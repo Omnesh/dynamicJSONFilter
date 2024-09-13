@@ -15,10 +15,6 @@ public class JsonFilter {
 
     /**
      * Parses a JSON string into a JsonNode object.
-     *
-     * @param jsonString the JSON string to parse
-     * @return the parsed JsonNode
-     * @throws IOException if the JSON string is invalid
      */
     public static JsonNode parseJson(String jsonString) throws IOException {
         return objectMapper.readTree(jsonString);
@@ -26,10 +22,6 @@ public class JsonFilter {
 
     /**
      * Compares a target JSON against a reference JSON based on specified conditions.
-     *
-     * @param referenceJson the reference JSON containing validation criteria
-     * @param targetJson    the target JSON to be validated
-     * @return true if the target JSON matches the reference JSON criteria, false otherwise
      */
     public static boolean matchJson(JsonNode referenceJson, JsonNode targetJson) {
         return matchesReferenceRecursive(targetJson, referenceJson);
@@ -37,10 +29,6 @@ public class JsonFilter {
 
     /**
      * Filters a list of target JSON objects, returning only those that match the reference conditions.
-     *
-     * @param referenceJson the reference JSON containing validation criteria
-     * @param targetJsons   the list of target JSONs to be filtered
-     * @return a list of matching target JSONs
      */
     public static List<JsonNode> filterMatchingJsons(JsonNode referenceJson, List<JsonNode> targetJsons) {
         return targetJsons.stream()
@@ -53,6 +41,7 @@ public class JsonFilter {
         // Iterate over the fields in the reference JSON
         Iterator<Map.Entry<String, JsonNode>> fields = reference.fields();
         while (fields.hasNext()) {
+
             Map.Entry<String, JsonNode> field = fields.next();
             String fieldName = field.getKey();
             JsonNode referenceValue = field.getValue();
@@ -60,37 +49,75 @@ public class JsonFilter {
 
             // Check if the target field exists
             if (targetValue == null) {
-                return false; // Reference field not present in target
+                return false;
             }
 
-            // Handle arrays, objects, and primitive values
-            if (referenceValue.isArray() && targetValue.isArray()) {
-                if (!matchArray(referenceValue, targetValue)) {
+            // Handle numeric comparisons
+            if (referenceValue.isTextual() && isComparisonOperator(referenceValue.asText())) {
+                if (!compareValues(referenceValue.asText(), targetValue)) {
                     return false;
                 }
-            } else if (referenceValue.isObject() && targetValue.isObject()) {
+            }
+
+            else if (referenceValue.isObject() && targetValue.isObject()) {
                 if (!matchesReferenceRecursive(targetValue, referenceValue)) {
                     return false;
                 }
-            } else if (!targetValue.equals(referenceValue)) {
-                return false; // Primitive value does not match
+            }
+
+            else if (referenceValue.isArray() && targetValue.isArray()) {
+                if (!validateArray(referenceValue, targetValue)) {
+                    return false;
+                }
+            }
+
+            else if (!targetValue.equals(referenceValue)) {
+                return false;
             }
         }
         return true;
     }
 
-    // Simplified array matching logic
-    private static boolean matchArray(JsonNode referenceArray, JsonNode targetArray) {
-        // Handle empty array validation
-        if (referenceArray.isEmpty() && !targetArray.isEmpty()) {
+    // Helper to determine if a string represents a comparison operator
+    private static boolean isComparisonOperator(String value) {
+        return value.startsWith(">") || value.startsWith("<") || value.contains("-");
+    }
+
+    // Helper to compare values using specified conditions
+    private static boolean compareValues(String condition, JsonNode targetValue) {
+        if (!targetValue.isNumber()) {
             return false;
         }
+        double targetNumber = targetValue.asDouble();
 
-        // Check if all elements in the reference array are present in the target array
+        if (condition.startsWith(">")) {
+            double comparisonValue = Double.parseDouble(condition.substring(1));
+            return targetNumber > comparisonValue;
+        }
+        if (condition.startsWith("<")) {
+            double comparisonValue = Double.parseDouble(condition.substring(1));
+            return targetNumber < comparisonValue;
+        }
+        if (condition.contains("-")) {
+            String[] bounds = condition.split("-");
+            double lowerBound = Double.parseDouble(bounds[0]);
+            double upperBound = Double.parseDouble(bounds[1]);
+            return targetNumber >= lowerBound && targetNumber <= upperBound;
+        }
+        return targetNumber == Double.parseDouble(condition);
+    }
+
+    // Array validation based on different conditions specified in the reference
+    private static boolean validateArray(JsonNode referenceArray, JsonNode targetArray) {
+        // Size only validation
+        if (referenceArray.size() == 1 && referenceArray.get(0).isTextual() && referenceArray.get(0).asText().startsWith("size")) {
+            String sizeCondition = referenceArray.get(0).asText().substring(4);
+            return validateSizeCondition(sizeCondition, targetArray.size());
+        }
+
+        // Check if target contains all reference elements
         for (JsonNode referenceElement : referenceArray) {
             boolean found = false;
-
-            // Compare array elements based on their type (string or object)
             if (referenceElement.isObject()) {
                 for (JsonNode targetElement : targetArray) {
                     if (targetElement.isObject() && matchesReferenceRecursive(targetElement, referenceElement)) {
@@ -107,11 +134,28 @@ public class JsonFilter {
                 }
             }
 
-            if (!found) {
-                return false;
-            }
         }
+
         return true;
     }
 
+    // Helper to validate size conditions like ">", "<", "=", and ranges
+    private static boolean validateSizeCondition(String condition, int size) {
+        if (condition.startsWith(">")) {
+            int threshold = Integer.parseInt(condition.substring(1));
+            return size > threshold;
+        } else if (condition.startsWith("<")) {
+            int threshold = Integer.parseInt(condition.substring(1));
+            return size < threshold;
+        } else if (condition.contains("-")) {
+            String[] bounds = condition.split("-");
+            int lowerBound = Integer.parseInt(bounds[0]);
+            int upperBound = Integer.parseInt(bounds[1]);
+            return size >= lowerBound && size <= upperBound;
+        } else if (condition.equals("=") || condition.equals("==")) {
+            int exactSize = Integer.parseInt(condition.substring(1));
+            return size == exactSize;
+        }
+        return false;
+    }
 }
